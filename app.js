@@ -693,4 +693,113 @@ class PharmAssistApp {
 
 // Calculation functions (keep existing)
 function calculateCrCl() {
-  const age = parse
+  const age = parseFloat(document.getElementById('age').value);
+  const weight = parseFloat(document.getElementById('weight').value);
+  const serum_cr = parseFloat(document.getElementById('serum_cr').value);
+  const gender = document.getElementById('gender').value;
+
+  if (!age || !weight || !serum_cr) {
+    alert('Please fill in all fields');
+    return;
+  }
+
+  let crcl = ((140 - age) * weight) / (72 * serum_cr);
+  if (gender === 'female') {
+    crcl *= 0.85;
+  }
+
+  const result = document.getElementById('crclResult');
+  result.innerHTML = `
+    <strong>Creatinine Clearance: ${crcl.toFixed(1)} mL/min</strong><br>
+    <em>Normal: >90 mL/min (young adult)</em><br>
+    <small>Formula: Cockcroft-Gault equation</small>
+  `;
+  result.classList.add('show');
+}
+
+function convertDose() {
+  const dose = parseFloat(document.getElementById('dose').value);
+  const fromUnit = document.getElementById('fromUnit').value;
+  const toUnit = document.getElementById('toUnit').value;
+
+  if (!dose) {
+    alert('Please enter a dose');
+    return;
+  }
+
+  const conversions = { 'mg': 1, 'g': 1000, 'mcg': 0.001, 'mEq': 1 };
+  const baseValue = dose * conversions[fromUnit];
+  const convertedValue = baseValue / conversions[toUnit];
+
+  const result = document.getElementById('conversionResult');
+  result.innerHTML = `<strong>${dose} ${fromUnit} = ${convertedValue} ${toUnit}</strong>`;
+  result.classList.add('show');
+}
+
+function calculateFlowRate() {
+  const volume = parseFloat(document.getElementById('volume').value);
+  const time = parseFloat(document.getElementById('time').value);
+  const dropFactor = parseFloat(document.getElementById('dropFactor').value);
+
+  if (!volume || !time || !dropFactor) {
+    alert('Please fill in all fields');
+    return;
+  }
+
+  const mlPerHour = volume / time;
+  const dropsPerMinute = (mlPerHour * dropFactor) / 60;
+
+  const result = document.getElementById('flowRateResult');
+  result.innerHTML = `
+    <strong>Flow Rate:</strong><br>
+    ${mlPerHour.toFixed(1)} mL/hr<br>
+    ${dropsPerMinute.toFixed(0)} drops/min
+  `;
+  result.classList.add('show');
+}
+
+function calculateBusiness() {
+  const strength = parseFloat(document.getElementById('strength').value);
+  const quantity = parseFloat(document.getElementById('quantity').value);
+  const desired = parseFloat(document.getElementById('desired').value);
+
+  if (!strength || !quantity || !desired) {
+    alert('Please fill in all fields');
+    return;
+  }
+
+  const stockNeeded = (desired * quantity) / strength;
+  const result = document.getElementById('businessResult');
+  result.innerHTML = `
+    <strong>Stock Solution Needed: ${stockNeeded.toFixed(2)} mL</strong><br>
+    <small>To make ${quantity} mL of ${desired}% solution</small>
+  `;
+  result.classList.add('show');
+}
+
+// Global functions for suggestions
+function selectSuggestion(inputId, drugName) {
+  const input = document.getElementById(inputId);
+  if (input) input.value = drugName;
+  
+  const suggestionId = inputId.replace('drug', 'suggestions');
+  const suggestionDiv = document.getElementById(suggestionId);
+  if (suggestionDiv) suggestionDiv.style.display = 'none';
+}
+
+function selectMultiSuggestion(inputId, drugName) {
+  const input = document.getElementById(inputId);
+  if (input) input.value = drugName;
+  
+  const suggestionId = inputId.replace('multiDrug_', 'multiSuggestions_');
+  const suggestionDiv = document.getElementById(suggestionId);
+  if (suggestionDiv) suggestionDiv.style.display = 'none';
+}
+
+// Initialize the application
+let app;
+document.addEventListener('DOMContentLoaded', () => {
+  console.log('🚀 DOM loaded, creating enhanced app...');
+  app = new PharmAssistApp();
+  console.log('✅ Enhanced app created successfully');
+});
