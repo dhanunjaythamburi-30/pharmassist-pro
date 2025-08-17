@@ -1,805 +1,578 @@
-// Enhanced PharmAssist App with Working Autocomplete
-console.log('🚀 Loading Enhanced PharmAssist App...');
+// PharmAssist Pro — RxNav + openFDA powered Drug Info and Interactions
+// Live autocomplete/normalization via RxNav; interactions via RxNav; labeling via openFDA.
+// RxNav docs: https://rxnav.nlm.nih.gov/REST/  | openFDA: https://api.fda.gov/drug/label/
+
+console.log('🚀 PharmAssist Pro (RxNav + openFDA) loading...');
+
+const RXNAV = {
+  suggest: async (query) => {
+    const q = encodeURIComponent(query.trim());
+    const url1 = `https://rxnav.nlm.nih.gov/REST/spellingsuggestions.json?name=${q}`;
+    const url2 = `https://rxnav.nlm.nih.gov/REST/drugs.json?name=${q}`;
+    try {
+      const [sugRes, drugRes] = await Promise.all([fetch(url1), fetch(url2)]);
+      const sugJson = await sugRes.json();
+      const drugJson = await drugRes.json();
+      const sugList = (sugJson.suggestionGroup?.suggestionList?.suggestion || []);
+      const drugConcepts = (drugJson?.drugGroup?.conceptGroup || [])
+        .flatMap(g => g?.conceptProperties || [])
+        .map(c => c.name)
+        .filter(Boolean);
+      const merged = [...new Set([...sugList, ...drugConcepts])];
+      return merged.slice(0, 25);
+    } catch (e) {
+      console.error('Suggest error:', e);
+      return [];
+    }
+  },
+
+  normalize: async (name) => {
+    const q = encodeURIComponent(name.trim());
+    const url = `https://rxnav.nlm.nih.gov/REST/approximateTerm.json?term=${q}&maxEntries=5`;
+    try {
+      const res = await fetch(url);
+      const json = await res.json();
+      const candidates = json.approximateGroup?.candidate || [];
+      if (!candidates.length) return null;
+      const best = candidates.sort((a, b) => parseInt(a.rank) - parseInt(b.rank))[0];
+      const rxcui = best.rxcui;
+      const nameRes = await fetch(`https://rxnav.nlm.nih.gov/REST/rxcui/${rxcui}.json`);
+      const nameJson = await nameRes.json();
+      const props = nameJson.idGroup || {};
+      return { rxcui, name: props.name || name };
+    } catch (e) {
+      console.error('Normalize error:', e);
+      return null;
+    }
+  },
+
+  interactionsForList: async (rxcuis) => {
+    const list = encodeURIComponent(rxcuis.join('+'));
+    const url = `https://rxnav.nlm.nih.gov/REST/interaction/list.json?rxcuis=${list}`;
+    try {
+      const res = await fetch(url);
+      return await res.json();
+    } catch (e) {
+      console.error('Interaction error:', e);
+      return null;
+    }
+  },
+
+  properties: async (rxcui) => {
+    try {
+      const url = `https://rxnav.nlm.nih.gov/REST/rxcui/${rxcui}/properties.json`;
+      const res = await fetch(url);
+      const json = await res.json();
+      return json?.properties || null;
+    } catch (e) {
+      console.error('Properties error:', e);
+      return null;
+    }
+  }
+};
+
+// openFDA helper
+const OpenFDA = {
+  // Try multiple queries to maximize hit rate:
+  // 1) exact brand name
+  // 2) exact substance (ingredient)
+  // 3) free-text search across fields
+  // Returns first matching labeling record
+  fetchLabel: async (displayName) => {
+    const q = displayName.trim();
+    const limit = 1;
+
+    const queries = [
+      // brand_name exact phrase
+      `brand_name:"${escapeFDA(q)}"`,
+      // generic/ingredient search by substance_name
+      `substance_name:"${escapeFDA(q)}"`,
+      // open text search
+      q
+    ];
+
+    for (const term of queries) {
+      const url = `https://api.fda.gov/drug/label.json?search=${encodeURIComponent(term)}&limit=${limit}`;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) continue;
+        const json = await res.json();
+        if (json?.results?.length) {
+          return json.results[0];
+        }
+      } catch (e) {
+        // Continue to next query
+      }
+    }
+    return null;
+  },
+
+  // Extract key sections safely
+  pickSections: (rec) => {
+    const pick = (key) => {
+      const v = rec?.[key];
+      if (!v) return null;
+      if (Array.isArray(v)) return v.join('\n\n');
+      return String(v);
+    };
+    return {
+      boxed_warning: pick('boxed_warning') || pick('boxed_warning_section'),
+      indications: pick('indications_and_usage'),
+      dosage: pick('dosage_and_administration'),
+      contraindications: pick('contraindications'),
+      warnings: pick('warnings') || pick('warnings_and_cautions') || pick('warnings_and_precautions'),
+      adverse_reactions: pick('adverse_reactions'),
+      patient_counseling: pick('information_for_patients') || pick('patient_counseling_information')
+    };
+  }
+};
+
+// Utility escaping
+function escapeHTML(str) {
+  return String(str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
+}
+function escapeFDA(str) {
+  // openFDA Lucene-like query escaping (basic)
+  return String(str).replace(/([+\-!(){}\[\]^"~*?:\\/])/g, '\\$1');
+}
 
 class PharmAssistApp {
   constructor() {
-    console.log('📱 PharmAssist constructor called');
     this.currentTab = 'interactions';
-    this.drugSuggestions = window.DRUG_DATABASE ? Object.keys(window.DRUG_DATABASE) : [];
-    this.drugCounter = 0;
     this.currentMode = 'two';
-    
-    setTimeout(() => {
-      this.init();
-    }, 100);
+    this.drugCounter = 0;
+    this.twoDrug = { a: null, b: null };
+    this.multiDrugs = [];
+    this.suggestionCache = new Map();
+    document.addEventListener('DOMContentLoaded', () => this.init());
   }
 
   init() {
-    console.log('🔧 Initializing app...');
-    this.setupEventListeners();
-    this.loadResourcesContent();
-    this.setupDrugSuggestions();
-    console.log('✅ App initialized successfully!');
-    console.log('📊 Loaded', this.drugSuggestions.length, 'drugs in database');
+    this.setupTabs();
+    this.setupModeToggle();
+    this.setupTwoDrugUI();
+    this.setupMultiDrugUI();
+    this.setupSearchUI();
+    console.log('✅ RxNav + openFDA initialized');
   }
 
-  setupEventListeners() {
-    console.log('🎯 Setting up event listeners...');
-    
-    // Tab navigation
+  // Tabs
+  setupTabs() {
     document.querySelectorAll('.nav-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
-        const tab = e.target.closest('.nav-btn').dataset.tab;
-        this.switchTab(tab);
+        const tab = e.currentTarget.dataset.tab;
+        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.nav-btn').forEach(n => n.classList.remove('active'));
+        document.getElementById(tab).classList.add('active');
+        e.currentTarget.classList.add('active');
+        this.currentTab = tab;
       });
     });
-
-    // Mode toggle buttons
-    const twoModeBtn = document.getElementById('twoModeBtn');
-    const multiModeBtn = document.getElementById('multiModeBtn');
-    
-    if (twoModeBtn) {
-      twoModeBtn.addEventListener('click', () => {
-        console.log('🔵 Two mode clicked!');
-        this.switchMode('two');
-      });
-    }
-
-    if (multiModeBtn) {
-      multiModeBtn.addEventListener('click', () => {
-        console.log('🟢 Multi mode clicked!');
-        this.switchMode('multi');
-      });
-    }
-
-    // Other buttons
-    const checkBtn = document.getElementById('checkInteraction');
-    if (checkBtn) {
-      checkBtn.addEventListener('click', () => this.checkInteraction());
-    }
-
-    const addBtn = document.getElementById('addDrugBtn');
-    if (addBtn) {
-      addBtn.addEventListener('click', () => this.addDrugInput());
-    }
-
-    const checkAllBtn = document.getElementById('checkAllInteractions');
-    if (checkAllBtn) {
-      checkAllBtn.addEventListener('click', () => this.checkAllInteractions());
-    }
-
-    const clearBtn = document.getElementById('clearAllDrugs');
-    if (clearBtn) {
-      clearBtn.addEventListener('click', () => this.clearAllDrugs());
-    }
-
-    // Quick buttons
-    document.querySelectorAll('.quick-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        if (e.target.dataset.combo) {
-          const [drug1, drug2] = e.target.dataset.combo.split(',');
-          this.switchMode('two');
-          setTimeout(() => {
-            const d1 = document.getElementById('drug1');
-            const d2 = document.getElementById('drug2');
-            if (d1) d1.value = drug1;
-            if (d2) d2.value = drug2;
-            this.checkInteraction();
-          }, 100);
-        } else if (e.target.dataset.regimen) {
-          const regimen = e.target.dataset.regimen.split(',');
-          this.switchMode('multi');
-          setTimeout(() => {
-            this.loadRegimen(regimen);
-          }, 100);
-        }
-      });
-    });
-
-    const searchBtn = document.getElementById('searchDrug');
-    if (searchBtn) {
-      searchBtn.addEventListener('click', () => this.searchDrugInfo());
-    }
-
-    const drugSearchInput = document.getElementById('drugSearch');
-    if (drugSearchInput) {
-      drugSearchInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') this.searchDrugInfo();
-      });
-    }
   }
 
-  switchTab(tabName) {
-    document.querySelectorAll('.tab-content').forEach(tab => {
-      tab.classList.remove('active');
-    });
-
-    document.querySelectorAll('.nav-btn').forEach(btn => {
-      btn.classList.remove('active');
-    });
-
-    const selectedTab = document.getElementById(tabName);
-    const selectedBtn = document.querySelector(`[data-tab="${tabName}"]`);
-    
-    if (selectedTab) selectedTab.classList.add('active');
-    if (selectedBtn) selectedBtn.classList.add('active');
-    
-    this.currentTab = tabName;
+  setupModeToggle() {
+    document.getElementById('twoModeBtn').addEventListener('click', () => this.switchMode('two'));
+    document.getElementById('multiModeBtn').addEventListener('click', () => this.switchMode('multi'));
   }
 
   switchMode(mode) {
-    console.log('🔄 SWITCHING MODE TO:', mode);
     this.currentMode = mode;
-    
-    document.querySelectorAll('.mode-btn').forEach(btn => {
-      btn.classList.remove('active');
-    });
-    
-    document.querySelectorAll('.mode-interface').forEach(interfaceEl => {
-      interfaceEl.classList.remove('active');
-    });
-    
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.mode-interface').forEach(i => i.classList.remove('active'));
     if (mode === 'two') {
-      const twoBtn = document.getElementById('twoModeBtn');
-      const twoInterface = document.getElementById('twoModeInterface');
-      
-      if (twoBtn) twoBtn.classList.add('active');
-      if (twoInterface) twoInterface.classList.add('active');
-      
-      this.setupDrugSuggestions();
+      document.getElementById('twoModeBtn').classList.add('active');
+      document.getElementById('twoModeInterface').classList.add('active');
     } else {
-      const multiBtn = document.getElementById('multiModeBtn');
-      const multiInterface = document.getElementById('multiModeInterface');
-      
-      if (multiBtn) multiBtn.classList.add('active');
-      if (multiInterface) multiInterface.classList.add('active');
-      
-      if (this.drugCounter === 0) {
+      document.getElementById('multiModeBtn').classList.add('active');
+      document.getElementById('multiModeInterface').classList.add('active');
+      if (this.multiDrugs.length === 0) {
         this.addDrugInput();
         this.addDrugInput();
       }
     }
   }
 
-  // FIXED: Enhanced drug suggestions with proper autocomplete
-  setupDrugSuggestions() {
-    const setupSuggestion = (inputId, suggestionId) => {
-      const input = document.getElementById(inputId);
-      const suggestionDiv = document.getElementById(suggestionId);
+  // Two-drug UI
+  setupTwoDrugUI() {
+    this.setupSuggestInput('drug1', 'suggestions1', (choice) => { this.twoDrug.a = choice; });
+    this.setupSuggestInput('drug2', 'suggestions2', (choice) => { this.twoDrug.b = choice; });
+    document.getElementById('checkInteraction').addEventListener('click', async () => {
+      await this.checkTwoDrugInteraction();
+    });
+  }
 
-      if (!input || !suggestionDiv) return;
+  async checkTwoDrugInteraction() {
+    const aVal = document.getElementById('drug1').value.trim();
+    const bVal = document.getElementById('drug2').value.trim();
+    if (!aVal || !bVal) return alert('Please enter both drugs.');
 
-      input.addEventListener('input', (e) => {
-        const query = e.target.value.toLowerCase().trim();
-        
-        if (query.length < 1) {
-          suggestionDiv.style.display = 'none';
-          return;
+    const a = this.twoDrug.a?.name?.toLowerCase() === aVal.toLowerCase() ? this.twoDrug.a : await RXNAV.normalize(aVal);
+    const b = this.twoDrug.b?.name?.toLowerCase() === bVal.toLowerCase() ? this.twoDrug.b : await RXNAV.normalize(bVal);
+    if (!a || !b) return alert('Could not resolve one or both drugs. Please select from suggestions.');
+
+    const json = await RXNAV.interactionsForList([a.rxcui, b.rxcui]);
+    this.renderTwoDrugResults(json, a, b);
+  }
+
+  mapSeverity(raw) {
+    if (!raw) return 'unknown';
+    const r = raw.toLowerCase();
+    if (r.includes('high') || r.includes('contra')) return 'major';
+    if (r.includes('moder')) return 'moderate';
+    if (r.includes('minor') || r.includes('low')) return 'minor';
+    return 'unknown';
+  }
+
+  renderTwoDrugResults(json, a, b) {
+    const container = document.getElementById('interactionResults');
+    if (!json || !json.fullInteractionTypeGroup) {
+      container.innerHTML = this.noInteractionHTML(a.name, b.name);
+      container.style.display = 'block';
+      return;
+    }
+    const interactions = [];
+    for (const group of json.fullInteractionTypeGroup) {
+      for (const fit of group.fullInteractionType || []) {
+        for (const pair of fit.interactionPair || []) {
+          const desc = pair.description || '';
+          const severity = (pair.severity || '').toLowerCase();
+          const sources = (pair.source || []).map(s => s?.name).filter(Boolean);
+          interactions.push({ severity: this.mapSeverity(severity), description: desc, sources });
         }
+      }
+    }
+    if (!interactions.length) {
+      container.innerHTML = this.noInteractionHTML(a.name, b.name);
+    } else {
+      const order = { major: 3, moderate: 2, minor: 1, unknown: 0 };
+      interactions.sort((x, y) => order[y.severity] - order[x.severity]);
+      const cards = interactions.map(i => `
+        <div class="interaction-result ${i.severity}">
+          <div class="severity-badge ${i.severity}">${i.severity.toUpperCase()}</div>
+          <h3>${escapeHTML(a.name)} + ${escapeHTML(b.name)}</h3>
+          <div style="margin-top: 0.75rem;"><p>${escapeHTML(i.description)}</p></div>
+          ${i.sources?.length ? `<div style="margin-top: 0.5rem; font-size: 0.85rem; color: #555;">Sources: ${i.sources.join(', ')}</div>` : ''}
+        </div>
+      `).join('');
+      container.innerHTML = cards;
+    }
+    container.style.display = 'block';
+  }
 
-        // Smart matching: starts with query OR contains query
-        const matches = this.drugSuggestions.filter(drug => {
-          const drugLower = drug.toLowerCase();
-          return drugLower.startsWith(query) || drugLower.includes(query);
-        }).sort((a, b) => {
-          // Prioritize starts-with matches
-          const aStarts = a.toLowerCase().startsWith(query);
-          const bStarts = b.toLowerCase().startsWith(query);
-          if (aStarts && !bStarts) return -1;
-          if (!aStarts && bStarts) return 1;
-          return a.localeCompare(b);
-        }).slice(0, 8);
+  noInteractionHTML(a, b) {
+    return `
+      <div class="interaction-result">
+        <div class="severity-badge minor">NO KNOWN MAJOR INTERACTION</div>
+        <h3>${escapeHTML(a)} + ${escapeHTML(b)}</h3>
+        <p>No major interaction found via RxNav dataset. Always verify with current clinical resources.</p>
+      </div>
+    `;
+  }
 
-        if (matches.length > 0) {
-          suggestionDiv.innerHTML = matches.map(drug => 
-            `<div class="suggestion-item" onclick="selectSuggestion('${inputId}', '${drug}')">${drug}</div>`
-          ).join('');
-          suggestionDiv.style.display = 'block';
-        } else {
-          suggestionDiv.style.display = 'none';
-        }
-      });
-
-      input.addEventListener('focus', (e) => {
-        if (e.target.value.length >= 1) {
-          e.target.dispatchEvent(new Event('input'));
-        }
-      });
-
-      // Hide suggestions when clicking outside
-      document.addEventListener('click', (e) => {
-        if (!e.target.closest('.input-group')) {
-          suggestionDiv.style.display = 'none';
-        }
-      });
-    };
-
-    setupSuggestion('drug1', 'suggestions1');
-    setupSuggestion('drug2', 'suggestions2');
+  // Multi-drug
+  setupMultiDrugUI() {
+    document.getElementById('addDrugBtn').addEventListener('click', () => this.addDrugInput());
+    document.getElementById('checkAllInteractions').addEventListener('click', () => this.checkAllInteractions());
+    document.getElementById('clearAllDrugs').addEventListener('click', () => this.clearAllDrugs());
   }
 
   addDrugInput() {
     this.drugCounter++;
-    const drugList = document.getElementById('drugList');
-    
-    if (!drugList) return;
-    
-    const drugItem = document.createElement('div');
-    drugItem.className = 'drug-item';
-    drugItem.dataset.drugId = this.drugCounter;
-    
-    drugItem.innerHTML = `
-      <div class="drug-number">${this.drugCounter}</div>
+    const list = document.getElementById('drugList');
+    const id = this.drugCounter;
+    const row = document.createElement('div');
+    row.className = 'drug-item';
+    row.dataset.drugId = id;
+    row.innerHTML = `
+      <div class="drug-number">${id}</div>
       <div class="input-group">
-        <input type="text" 
-               placeholder="Enter drug name..." 
-               id="multiDrug_${this.drugCounter}"
-               autocomplete="off">
-        <div class="suggestions" id="multiSuggestions_${this.drugCounter}"></div>
+        <input type="text" id="multiDrug_${id}" placeholder="Enter drug name..." autocomplete="off">
+        <div class="suggestions" id="multiSuggestions_${id}"></div>
       </div>
-      <button class="remove-drug" onclick="app.removeDrugInput(${this.drugCounter})">
+      <button class="remove-drug" aria-label="remove" title="Remove" onclick="app.removeDrugInput(${id})">
         <i class="fas fa-times"></i>
       </button>
     `;
-    
-    drugList.appendChild(drugItem);
-    this.setupMultiSuggestions(`multiDrug_${this.drugCounter}`, `multiSuggestions_${this.drugCounter}`);
-  }
-
-  setupMultiSuggestions(inputId, suggestionId) {
-    const input = document.getElementById(inputId);
-    const suggestionDiv = document.getElementById(suggestionId);
-
-    if (!input || !suggestionDiv) return;
-
-    input.addEventListener('input', (e) => {
-      const query = e.target.value.toLowerCase().trim();
-      
-      if (query.length < 1) {
-        suggestionDiv.style.display = 'none';
-        return;
-      }
-
-      const matches = this.drugSuggestions.filter(drug => {
-        const drugLower = drug.toLowerCase();
-        return drugLower.startsWith(query) || drugLower.includes(query);
-      }).sort((a, b) => {
-        const aStarts = a.toLowerCase().startsWith(query);
-        const bStarts = b.toLowerCase().startsWith(query);
-        if (aStarts && !bStarts) return -1;
-        if (!aStarts && bStarts) return 1;
-        return a.localeCompare(b);
-      }).slice(0, 8);
-
-      if (matches.length > 0) {
-        suggestionDiv.innerHTML = matches.map(drug => 
-          `<div class="suggestion-item" onclick="selectMultiSuggestion('${inputId}', '${drug}')">${drug}</div>`
-        ).join('');
-        suggestionDiv.style.display = 'block';
-      } else {
-        suggestionDiv.style.display = 'none';
-      }
-    });
-
-    input.addEventListener('focus', (e) => {
-      if (e.target.value.length >= 1) {
-        e.target.dispatchEvent(new Event('input'));
-      }
+    list.appendChild(row);
+    this.setupSuggestInput(`multiDrug_${id}`, `multiSuggestions_${id}`, (choice) => {
+      const idx = this.multiDrugs.findIndex(x => x.inputId === `multiDrug_${id}`);
+      const record = { inputId: `multiDrug_${id}`, rxcui: choice.rxcui, name: choice.name };
+      if (idx >= 0) this.multiDrugs[idx] = record; else this.multiDrugs.push(record);
     });
   }
 
-  // FIXED: Case-insensitive interaction finding
-  findInteraction(drug1, drug2) {
-    if (!window.DRUG_INTERACTIONS) return null;
-    
-    const drug1Lower = drug1.toLowerCase();
-    const drug2Lower = drug2.toLowerCase();
-    
-    return window.DRUG_INTERACTIONS.find(interaction => 
-      (interaction.drug1.toLowerCase() === drug1Lower && interaction.drug2.toLowerCase() === drug2Lower) ||
-      (interaction.drug1.toLowerCase() === drug2Lower && interaction.drug2.toLowerCase() === drug1Lower)
-    );
-  }
-
-  // Enhanced search with better drug info display
-  searchDrugInfo() {
-    const queryInput = document.getElementById('drugSearch');
-    if (!queryInput) return;
-
-    const query = queryInput.value.trim().toLowerCase();
-    if (!query) {
-      alert('Please enter a drug name');
-      return;
-    }
-
-    this.showLoading();
-    setTimeout(() => {
-      const drugInfo = window.DRUG_DATABASE ? window.DRUG_DATABASE[query] : null;
-      this.hideLoading();
-      this.displayDrugInfo(drugInfo, query);
-    }, 800);
-  }
-
-  displayDrugInfo(drugInfo, query) {
-    const resultsContainer = document.getElementById('drugInfoResults');
-    if (!resultsContainer) return;
-
-    if (!drugInfo) {
-      resultsContainer.innerHTML = `
-        <div class="interaction-result">
-          <h3>Drug information not found</h3>
-          <p>Information for "${this.capitalize(query)}" is not available in our current database.</p>
-          <p><strong>Available drugs include:</strong> ${this.drugSuggestions.slice(0, 10).join(', ')}, and many more...</p>
-        </div>
-      `;
-      return;
-    }
-
-    resultsContainer.innerHTML = `
-      <div style="background: white; padding: 2rem; border-radius: 16px; box-shadow: var(--shadow-lg);">
-        <div style="margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 2px solid var(--border);">
-          <h2 style="color: var(--primary); margin-bottom: 0.5rem;">${drugInfo.genericName}</h2>
-          <div style="margin-bottom: 0.5rem;">
-            <strong>Brand Names:</strong> ${drugInfo.brandNames.join(', ')}
-          </div>
-          <div>
-            <strong>Class:</strong> ${drugInfo.drugClass}
-          </div>
-        </div>
-        
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
-          <div>
-            <h3 style="color: var(--dark); margin-bottom: 0.5rem;"><i class="fas fa-clipboard-list"></i> Indications</h3>
-            <ul style="margin-left: 1rem;">
-              ${drugInfo.indications.map(indication => `<li>${indication}</li>`).join('')}
-            </ul>
-          </div>
-          
-          <div>
-            <h3 style="color: var(--dark); margin-bottom: 0.5rem;"><i class="fas fa-cog"></i> Mechanism</h3>
-            <p>${drugInfo.mechanism}</p>
-          </div>
-          
-          <div>
-            <h3 style="color: var(--dark); margin-bottom: 0.5rem;"><i class="fas fa-pills"></i> Dosing</h3>
-            <p><strong>Adult:</strong> ${drugInfo.dosing.adult}</p>
-            <p><strong>Elderly:</strong> ${drugInfo.dosing.elderly}</p>
-          </div>
-          
-          <div>
-            <h3 style="color: var(--dark); margin-bottom: 0.5rem;"><i class="fas fa-exclamation-triangle"></i> Warnings</h3>
-            <ul style="margin-left: 1rem;">
-              ${drugInfo.warnings.map(warning => `<li>${warning}</li>`).join('')}
-            </ul>
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  loadResourcesContent() {
-    console.log('📚 Loading resources...');
-    
-    // Emergency drugs
-    const emergencyEl = document.getElementById('emergencyDrugs');
-    if (emergencyEl && window.EMERGENCY_DRUGS) {
-      emergencyEl.innerHTML = window.EMERGENCY_DRUGS.map(drug => `
-        <div style="margin-bottom: 1.5rem; padding: 1rem; background: var(--light); border-radius: 8px;">
-          <h4 style="color: var(--primary); margin-bottom: 0.5rem;">${drug.drug}</h4>
-          <p><strong>Indication:</strong> ${drug.indication}</p>
-          <p><strong>Dose:</strong> ${drug.dose}</p>
-          <p><strong>Route:</strong> ${drug.route}</p>
-          <p><strong>Notes:</strong> ${drug.notes}</p>
-        </div>
-      `).join('');
-    }
-
-    // Controlled substances
-    const controlledEl = document.getElementById('controlledSubstances');
-    if (controlledEl && window.CONTROLLED_SUBSTANCES) {
-      controlledEl.innerHTML = Object.entries(window.CONTROLLED_SUBSTANCES).map(([schedule, info]) => `
-        <div style="margin-bottom: 1.5rem; padding: 1rem; background: var(--light); border-radius: 8px;">
-          <h4 style="color: var(--primary); margin-bottom: 0.5rem;">Schedule ${schedule}</h4>
-          <p>${info.description}</p>
-          <p><strong>Examples:</strong> ${info.examples.join(', ')}</p>
-          <p><strong>Prescribing:</strong> ${info.prescribing}</p>
-        </div>
-      `).join('');
-    }
-
-    // Black box warnings
-    const blackBoxEl = document.getElementById('blackBoxWarnings');
-    if (blackBoxEl && window.BLACK_BOX_WARNINGS) {
-      blackBoxEl.innerHTML = window.BLACK_BOX_WARNINGS.map(item => `
-        <div style="margin-bottom: 1.5rem; padding: 1rem; background: var(--light); border-radius: 8px;">
-          <h4 style="color: var(--danger); margin-bottom: 0.5rem;">${item.drug}</h4>
-          <p><strong>${item.warning}</strong></p>
-          <p>${item.description}</p>
-        </div>
-      `).join('');
-    }
-
-    // Vaccine schedule
-    const vaccineEl = document.getElementById('vaccineSchedule');
-    if (vaccineEl) {
-      vaccineEl.innerHTML = `
-        <div style="padding: 1rem; background: var(--light); border-radius: 8px;">
-          <h4 style="color: var(--primary); margin-bottom: 1rem;">Adult Routine Vaccinations</h4>
-          <ul style="margin-left: 1rem; line-height: 1.6;">
-            <li><strong>Influenza:</strong> Annual for all adults ≥6 months</li>
-            <li><strong>Td/Tdap:</strong> Every 10 years</li>
-            <li><strong>MMR:</strong> If no evidence of immunity</li>
-            <li><strong>Varicella:</strong> If no evidence of immunity</li>
-            <li><strong>Zoster:</strong> ≥50 years (Shingrix preferred)</li>
-            <li><strong>Pneumococcal:</strong> ≥65 years or high-risk conditions</li>
-            <li><strong>HPV:</strong> Through age 26 (catch-up to 45)</li>
-            <li><strong>Hepatitis B:</strong> High-risk adults</li>
-          </ul>
-        </div>
-      `;
-    }
-  }
-
-  // Rest of the methods remain the same...
-  removeDrugInput(drugId) {
-    const drugItem = document.querySelector(`[data-drug-id="${drugId}"]`);
-    if (drugItem) drugItem.remove();
-    this.renumberDrugs();
-  }
-
-  renumberDrugs() {
-    const drugItems = document.querySelectorAll('.drug-item');
-    drugItems.forEach((item, index) => {
-      const number = index + 1;
-      const numberDiv = item.querySelector('.drug-number');
-      if (numberDiv) numberDiv.textContent = number;
+  removeDrugInput(id) {
+    const el = document.querySelector(`[data-drug-id="${id}"]`);
+    if (el) el.remove();
+    this.multiDrugs = this.multiDrugs.filter(x => x.inputId !== `multiDrug_${id}`);
+    document.querySelectorAll('#drugList .drug-item').forEach((item, i) => {
+      const num = item.querySelector('.drug-number');
+      if (num) num.textContent = (i + 1).toString();
     });
   }
 
   clearAllDrugs() {
-    const drugList = document.getElementById('drugList');
-    const resultsContainer = document.getElementById('multiInteractionResults');
-    const summary = document.getElementById('resultsSummary');
-    
-    if (drugList) drugList.innerHTML = '';
-    if (resultsContainer) resultsContainer.innerHTML = '';
-    if (summary) summary.style.display = 'none';
-    
+    document.getElementById('drugList').innerHTML = '';
+    document.getElementById('multiInteractionResults').innerHTML = '';
+    document.getElementById('resultsSummary').style.display = 'none';
     this.drugCounter = 0;
+    this.multiDrugs = [];
     this.addDrugInput();
     this.addDrugInput();
   }
 
-  loadRegimen(drugs) {
-    this.clearAllDrugs();
-    
-    drugs.forEach(drug => {
-      this.addDrugInput();
-      const inputs = document.querySelectorAll('#drugList input');
-      const lastInput = inputs[inputs.length - 1];
-      if (lastInput) lastInput.value = drug.trim();
-    });
-  }
-
-  getAllDrugs() {
-    const inputs = document.querySelectorAll('#drugList input');
-    const drugs = [];
-    
-    inputs.forEach(input => {
-      const value = input.value.trim().toLowerCase();
-      if (value) drugs.push(value);
-    });
-    
-    return drugs;
-  }
-
-  checkInteraction() {
-    const drug1Input = document.getElementById('drug1');
-    const drug2Input = document.getElementById('drug2');
-    const resultsContainer = document.getElementById('interactionResults');
-
-    if (!drug1Input || !drug2Input) return;
-
-    const drug1 = drug1Input.value.trim().toLowerCase();
-    const drug2 = drug2Input.value.trim().toLowerCase();
-
-    if (!drug1 || !drug2) {
-      alert('Please enter both drugs');
-      return;
+  async checkAllInteractions() {
+    const inputs = Array.from(document.querySelectorAll('#drugList input'));
+    const selected = [];
+    for (const input of inputs) {
+      const val = input.value.trim();
+      if (!val) continue;
+      const existing = this.multiDrugs.find(x => x.inputId === input.id && x.name.toLowerCase() === val.toLowerCase());
+      if (existing) selected.push({ rxcui: existing.rxcui, name: existing.name });
+      else {
+        const norm = await RXNAV.normalize(val);
+        if (norm) selected.push(norm);
+      }
     }
-
-    if (drug1 === drug2) {
-      alert('Please enter two different drugs');
-      return;
+    const uniqByCui = [];
+    const seen = new Set();
+    for (const s of selected) {
+      if (!seen.has(s.rxcui)) { seen.add(s.rxcui); uniqByCui.push(s); }
     }
+    if (uniqByCui.length < 2) return alert('Please enter at least 2 distinct drugs.');
 
     this.showLoading();
-
-    setTimeout(() => {
-      const interaction = this.findInteraction(drug1, drug2);
-      this.hideLoading();
-      this.displayInteractionResults(interaction, drug1, drug2);
-      if (resultsContainer) resultsContainer.style.display = 'block';
-    }, 1000);
+    const json = await RXNAV.interactionsForList(uniqByCui.map(x => x.rxcui));
+    this.hideLoading();
+    this.renderMultiResults(json, uniqByCui);
   }
 
-  checkAllInteractions() {
-    const drugs = this.getAllDrugs();
-    
-    if (drugs.length < 2) {
-      alert('Please enter at least 2 drugs');
+  renderMultiResults(json, drugs) {
+    const resultsContainer = document.getElementById('multiInteractionResults');
+    const resultsSummary = document.getElementById('resultsSummary');
+
+    if (!json || !json.fullInteractionTypeGroup) {
+      resultsContainer.innerHTML = this.multiNoInteractionsHTML(drugs);
+      resultsSummary.style.display = 'block';
+      document.getElementById('totalDrugs').textContent = String(drugs.length);
+      document.getElementById('totalInteractions').textContent = '0';
+      document.getElementById('majorInteractions').textContent = '0';
       return;
     }
 
-    const uniqueDrugs = [...new Set(drugs)];
-    if (uniqueDrugs.length < drugs.length) {
-      alert('Please remove duplicate drugs');
-      return;
-    }
+    const nameByCUI = new Map(drugs.map(d => [d.rxcui, d.name]));
+    const order = { major: 3, moderate: 2, minor: 1, unknown: 0 };
+    const cards = [];
+    let totalInteractions = 0;
+    let majorCount = 0;
 
-    this.showLoading();
+    for (const group of json.fullInteractionTypeGroup) {
+      for (const fit of group.fullInteractionType || []) {
+        const items = fit?.minConcept || [];
+        if (items.length < 2) continue;
+        const d1 = items[0]?.rxcui; const d2 = items[1]?.rxcui;
+        const name1 = nameByCUI.get(d1) || items?.name || d1;
+        const name2 = nameByCUI.get(d2) || items[1]?.name || d2;
 
-    setTimeout(() => {
-      const interactions = this.findAllInteractions(uniqueDrugs);
-      this.hideLoading();
-      this.displayMultiResults(interactions, uniqueDrugs);
-    }, 1500);
-  }
-
-  findAllInteractions(drugs) {
-    const interactions = [];
-    
-    for (let i = 0; i < drugs.length; i++) {
-      for (let j = i + 1; j < drugs.length; j++) {
-        const interaction = this.findInteraction(drugs[i], drugs[j]);
-        if (interaction) {
-          interactions.push({
-            ...interaction,
-            drug1Display: this.capitalize(drugs[i]),
-            drug2Display: this.capitalize(drugs[j])
-          });
+        for (const p of (fit.interactionPair || [])) {
+          totalInteractions++;
+          const sev = this.mapSeverity((p.severity || '').toLowerCase());
+          if (sev === 'major') majorCount++;
+          cards.push({ sev, html: `
+            <div class="interaction-pair ${sev}">
+              <div class="pair-header">
+                <div class="drug-pair">${escapeHTML(name1)} <i class="fas fa-exchange-alt" style="color: var(--primary);"></i> ${escapeHTML(name2)}</div>
+                <div class="severity-badge ${sev}">${sev.toUpperCase()}</div>
+              </div>
+              <div class="interaction-details">
+                <h4><i class="fas fa-exclamation-triangle"></i> Details</h4>
+                <p>${escapeHTML(p.description || 'No description provided by source')}</p>
+              </div>
+              ${p.source?.length ? `
+              <div class="interaction-meta">
+                <div><strong>Sources:</strong> ${p.source.map(s => s.name).join(', ')}</div>
+              </div>` : ``}
+            </div>
+          `});
         }
       }
     }
-    
-    return interactions.sort((a, b) => {
-      const severityOrder = { major: 3, moderate: 2, minor: 1 };
-      return severityOrder[b.severity] - severityOrder[a.severity];
-    });
+    cards.sort((a, b) => order[b.sev] - order[a.sev]);
+    resultsContainer.innerHTML = cards.length ? cards.map(c => c.html).join('') : this.multiNoInteractionsHTML(drugs);
+
+    resultsSummary.style.display = 'block';
+    document.getElementById('totalDrugs').textContent = String(drugs.length);
+    document.getElementById('totalInteractions').textContent = String(totalInteractions);
+    document.getElementById('majorInteractions').textContent = String(majorCount);
+    resultsSummary.scrollIntoView({ behavior: 'smooth' });
   }
 
-  displayInteractionResults(interaction, drug1, drug2) {
-    const resultsContainer = document.getElementById('interactionResults');
-    if (!resultsContainer) return;
-    
-    if (!interaction) {
-      resultsContainer.innerHTML = `
-        <div class="interaction-result">
-          <div class="severity-badge minor">No Known Interaction</div>
-          <h3>${this.capitalize(drug1)} + ${this.capitalize(drug2)}</h3>
-          <p>No major interaction found in our database. However, always consult comprehensive resources and monitor patients for unexpected effects.</p>
-          <p><strong>Recommendation:</strong> Continue routine monitoring and patient assessment.</p>
-        </div>
-      `;
-      return;
-    }
-
-    resultsContainer.innerHTML = `
-      <div class="interaction-result ${interaction.severity}">
-        <div class="severity-badge ${interaction.severity}">${interaction.severity.toUpperCase()}</div>
-        <h3>${this.capitalize(interaction.drug1)} + ${this.capitalize(interaction.drug2)}</h3>
-        
-        <div style="margin: 1.5rem 0;">
-          <h4><i class="fas fa-cogs"></i> Mechanism:</h4>
-          <p>${interaction.mechanism}</p>
-        </div>
-
-        <div style="margin: 1.5rem 0;">
-          <h4><i class="fas fa-exclamation-triangle"></i> Clinical Effect:</h4>
-          <p>${interaction.clinicalEffect}</p>
-        </div>
-
-        <div style="margin: 1.5rem 0;">
-          <h4><i class="fas fa-user-md"></i> Management:</h4>
-          <p>${interaction.management}</p>
-        </div>
-
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1.5rem; font-size: 0.9rem; color: #666;">
-          <div><strong>Onset:</strong> ${interaction.onset}</div>
-          <div><strong>Documentation:</strong> ${interaction.documentation}</div>
-        </div>
+  multiNoInteractionsHTML(drugs) {
+    const names = drugs.map(d => d.name).join(', ');
+    return `
+      <div class="no-interactions">
+        <i class="fas fa-check-circle"></i>
+        <h3>No Interactions Found</h3>
+        <p>No interactions returned by RxNav for: ${escapeHTML(names)}</p>
+        <p><em>Always verify with updated clinical resources.</em></p>
       </div>
     `;
   }
 
-  displayMultiResults(interactions, drugs) {
-    const resultsContainer = document.getElementById('multiInteractionResults');
-    const resultsSummary = document.getElementById('resultsSummary');
-    
-    if (!resultsContainer || !resultsSummary) return;
-    
-    const majorCount = interactions.filter(i => i.severity === 'major').length;
-    
-    const totalDrugsEl = document.getElementById('totalDrugs');
-    const totalInteractionsEl = document.getElementById('totalInteractions');
-    const majorInteractionsEl = document.getElementById('majorInteractions');
-    
-    if (totalDrugsEl) totalDrugsEl.textContent = drugs.length;
-    if (totalInteractionsEl) totalInteractionsEl.textContent = interactions.length;
-    if (majorInteractionsEl) majorInteractionsEl.textContent = majorCount;
-    
-    resultsSummary.style.display = 'block';
-    
-    if (interactions.length === 0) {
-      resultsContainer.innerHTML = `
-        <div class="no-interactions">
-          <i class="fas fa-check-circle"></i>
-          <h3>No Significant Interactions Found</h3>
-          <p>No major interactions detected between the ${drugs.length} medications in our database.</p>
-          <p><em>Continue routine monitoring and patient assessment. Always verify with current clinical resources.</em></p>
+  // Drug Info (RxNav + openFDA)
+  setupSearchUI() {
+    document.getElementById('searchDrug').addEventListener('click', () => this.searchDrugInfo());
+    document.getElementById('drugSearch').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') this.searchDrugInfo();
+    });
+  }
+
+  async searchDrugInfo() {
+    const q = document.getElementById('drugSearch').value.trim();
+    if (!q) return alert('Enter a drug name');
+
+    this.showLoading();
+    const norm = await RXNAV.normalize(q);
+    let props = null;
+    let label = null;
+
+    if (norm) {
+      props = await RXNAV.properties(norm.rxcui);
+      // Try openFDA with RxNav preferred name first; fallback to user input
+      label = await OpenFDA.fetchLabel(props?.name || norm.name || q) || await OpenFDA.fetchLabel(q);
+    }
+    this.hideLoading();
+
+    const container = document.getElementById('drugInfoResults');
+    if (!norm) {
+      container.innerHTML = `
+        <div class="interaction-result">
+          <h3>Drug not found</h3>
+          <p>Could not resolve "${escapeHTML(q)}" via RxNorm. Try another spelling or pick from suggestions.</p>
         </div>
       `;
-    } else {
-      resultsContainer.innerHTML = interactions.map(interaction => `
-        <div class="interaction-pair ${interaction.severity}">
-          <div class="pair-header">
-            <div class="drug-pair">
-              ${interaction.drug1Display} <i class="fas fa-exchange-alt" style="color: var(--primary);"></i> ${interaction.drug2Display}
-            </div>
-            <div class="severity-badge ${interaction.severity}">${interaction.severity.toUpperCase()}</div>
-          </div>
-          
-          <div class="interaction-details">
-            <h4><i class="fas fa-cogs"></i> Mechanism</h4>
-            <p>${interaction.mechanism}</p>
-          </div>
-
-          <div class="interaction-details">
-            <h4><i class="fas fa-exclamation-triangle"></i> Clinical Effect</h4>
-            <p>${interaction.clinicalEffect}</p>
-          </div>
-
-          <div class="interaction-details">
-            <h4><i class="fas fa-user-md"></i> Management</h4>
-            <p>${interaction.management}</p>
-          </div>
-
-          <div class="interaction-meta">
-            <div><strong>Onset:</strong> ${interaction.onset}</div>
-            <div><strong>Documentation:</strong> ${interaction.documentation}</div>
-          </div>
-        </div>
-      `).join('');
+      return;
     }
-    
-    resultsContainer.style.display = 'block';
-    resultsSummary.scrollIntoView({ behavior: 'smooth' });
+
+    const sections = label ? OpenFDA.pickSections(label) : null;
+
+    container.innerHTML = `
+      <div class="drug-info-card" style="background: white; padding: 2rem; border-radius: 16px; box-shadow: var(--shadow-lg);">
+        <div class="drug-header" style="margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 2px solid var(--border);">
+          <h2 style="color: var(--primary); margin-bottom: 0.25rem;">${escapeHTML(norm.name)}</h2>
+          <div style="font-size: 0.95rem; color: #555;">RxCUI: ${escapeHTML(norm.rxcui)}</div>
+        </div>
+
+        ${props ? `
+        <div class="drug-content" style="line-height:1.6; margin-bottom:1rem;">
+          <p><strong>RxNorm Name:</strong> ${escapeHTML(props.name || norm.name)}</p>
+          <p><strong>TTY:</strong> ${escapeHTML(props.tty || 'N/A')}</p>
+          ${props.synonym ? `<p><strong>Synonyms:</strong> ${escapeHTML(props.synonym)}</p>` : ``}
+        </div>` : ``}
+
+        ${sections ? `
+        <div class="drug-sections" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px,1fr)); gap:1rem;">
+          ${sections.boxed_warning ? sectionCard('Boxed Warning', sections.boxed_warning, 'danger') : ``}
+          ${sections.indications ? sectionCard('Indications & Usage', sections.indications) : ``}
+          ${sections.dosage ? sectionCard('Dosage & Administration', sections.dosage) : ``}
+          ${sections.contraindications ? sectionCard('Contraindications', sections.contraindications, 'warning') : ``}
+          ${sections.warnings ? sectionCard('Warnings & Precautions', sections.warnings, 'warning') : ``}
+          ${sections.adverse_reactions ? sectionCard('Adverse Reactions', sections.adverse_reactions) : ``}
+          ${sections.patient_counseling ? sectionCard('Patient Counseling', sections.patient_counseling) : ``}
+        </div>
+        <p style="margin-top:1rem; font-size:0.85rem; color:#666;">
+          Sources: RxNav/RxNorm (identifiers) and openFDA (labeling). Educational use only; verify with official product labeling.
+        </p>` : `
+        <div class="interaction-result">
+          <h3>Labeling not found</h3>
+          <p>openFDA labeling was not available for this term. Try alternative brand or generic names.</p>
+        </div>`}
+      </div>
+    `;
   }
 
-  showLoading() {
-    const loading = document.getElementById('loadingOverlay');
-    if (loading) loading.classList.add('show');
+  // Generic suggestion input
+  setupSuggestInput(inputId, suggestBoxId, onChoice) {
+    const input = document.getElementById(inputId);
+    const box = document.getElementById(suggestBoxId);
+    if (!input || !box) return;
+
+    let timer;
+    const fetchSuggestions = async (q) => {
+      if (!q) return [];
+      const key = q.toLowerCase();
+      if (this.suggestionCache.has(key)) return this.suggestionCache.get(key);
+      const list = await RXNAV.suggest(q);
+      this.suggestionCache.set(key, list);
+      return list;
+    };
+
+    input.addEventListener('input', async (e) => {
+      const q = e.target.value.trim();
+      if (q.length < 1) {
+        box.style.display = 'none';
+        return;
+      }
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        const suggestions = await fetchSuggestions(q);
+        const lower = q.toLowerCase();
+        const filtered = suggestions
+          .filter(s => s.toLowerCase().includes(lower))
+          .sort((a, b) => {
+            const as = a.toLowerCase().startsWith(lower);
+            const bs = b.toLowerCase().startsWith(lower);
+            if (as && !bs) return -1;
+            if (!as && bs) return 1;
+            return a.localeCompare(b);
+          })
+          .slice(0, 12);
+
+        if (!filtered.length) {
+          box.style.display = 'none';
+          return;
+        }
+
+        box.innerHTML = filtered.map(name => `<div class="suggestion-item" data-name="${escapeHTML(name)}">${escapeHTML(name)}</div>`).join('');
+        box.style.display = 'block';
+
+        box.querySelectorAll('.suggestion-item').forEach(item => {
+          item.addEventListener('click', async () => {
+            const name = item.getAttribute('data-name');
+            input.value = name;
+            box.style.display = 'none';
+            const norm = await RXNAV.normalize(name);
+            if (norm && onChoice) onChoice(norm);
+          });
+        });
+      }, 150);
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.input-group')) box.style.display = 'none';
+    });
   }
 
-  hideLoading() {
-    const loading = document.getElementById('loadingOverlay');
-    if (loading) loading.classList.remove('show');
-  }
-
-  capitalize(str) {
-    return str.charAt(0).toUpperCase() + str.slice(1);
-  }
+  showLoading() { document.getElementById('loadingOverlay')?.classList.add('show'); }
+  hideLoading() { document.getElementById('loadingOverlay')?.classList.remove('show'); }
 }
 
-// Calculation functions (keep existing)
-function calculateCrCl() {
-  const age = parseFloat(document.getElementById('age').value);
-  const weight = parseFloat(document.getElementById('weight').value);
-  const serum_cr = parseFloat(document.getElementById('serum_cr').value);
-  const gender = document.getElementById('gender').value;
-
-  if (!age || !weight || !serum_cr) {
-    alert('Please fill in all fields');
-    return;
-  }
-
-  let crcl = ((140 - age) * weight) / (72 * serum_cr);
-  if (gender === 'female') {
-    crcl *= 0.85;
-  }
-
-  const result = document.getElementById('crclResult');
-  result.innerHTML = `
-    <strong>Creatinine Clearance: ${crcl.toFixed(1)} mL/min</strong><br>
-    <em>Normal: >90 mL/min (young adult)</em><br>
-    <small>Formula: Cockcroft-Gault equation</small>
+// Section card helper for labeling blocks
+function sectionCard(title, text, tone) {
+  const color = tone === 'danger' ? 'var(--danger)' : tone === 'warning' ? 'var(--warning)' : 'var(--primary)';
+  const bg = tone === 'danger' ? '#fef2f2' : tone === 'warning' ? '#fffbeb' : '#f8fafc';
+  return `
+    <div style="background:${bg}; border-left:4px solid ${color}; padding:1rem; border-radius:8px;">
+      <h4 style="margin-bottom:0.5rem; color:${color};">${escapeHTML(title)}</h4>
+      <div style="white-space:pre-wrap; color:#1f2937; font-size:0.95rem; line-height:1.5;">${escapeHTML(truncate(text, 2000))}</div>
+    </div>
   `;
-  result.classList.add('show');
 }
 
-function convertDose() {
-  const dose = parseFloat(document.getElementById('dose').value);
-  const fromUnit = document.getElementById('fromUnit').value;
-  const toUnit = document.getElementById('toUnit').value;
-
-  if (!dose) {
-    alert('Please enter a dose');
-    return;
-  }
-
-  const conversions = { 'mg': 1, 'g': 1000, 'mcg': 0.001, 'mEq': 1 };
-  const baseValue = dose * conversions[fromUnit];
-  const convertedValue = baseValue / conversions[toUnit];
-
-  const result = document.getElementById('conversionResult');
-  result.innerHTML = `<strong>${dose} ${fromUnit} = ${convertedValue} ${toUnit}</strong>`;
-  result.classList.add('show');
+function truncate(s, max) {
+  if (!s) return '';
+  return s.length > max ? s.slice(0, max) + '\n…' : s;
 }
 
-function calculateFlowRate() {
-  const volume = parseFloat(document.getElementById('volume').value);
-  const time = parseFloat(document.getElementById('time').value);
-  const dropFactor = parseFloat(document.getElementById('dropFactor').value);
-
-  if (!volume || !time || !dropFactor) {
-    alert('Please fill in all fields');
-    return;
-  }
-
-  const mlPerHour = volume / time;
-  const dropsPerMinute = (mlPerHour * dropFactor) / 60;
-
-  const result = document.getElementById('flowRateResult');
-  result.innerHTML = `
-    <strong>Flow Rate:</strong><br>
-    ${mlPerHour.toFixed(1)} mL/hr<br>
-    ${dropsPerMinute.toFixed(0)} drops/min
-  `;
-  result.classList.add('show');
-}
-
-function calculateBusiness() {
-  const strength = parseFloat(document.getElementById('strength').value);
-  const quantity = parseFloat(document.getElementById('quantity').value);
-  const desired = parseFloat(document.getElementById('desired').value);
-
-  if (!strength || !quantity || !desired) {
-    alert('Please fill in all fields');
-    return;
-  }
-
-  const stockNeeded = (desired * quantity) / strength;
-  const result = document.getElementById('businessResult');
-  result.innerHTML = `
-    <strong>Stock Solution Needed: ${stockNeeded.toFixed(2)} mL</strong><br>
-    <small>To make ${quantity} mL of ${desired}% solution</small>
-  `;
-  result.classList.add('show');
-}
-
-// Global functions for suggestions
-function selectSuggestion(inputId, drugName) {
-  const input = document.getElementById(inputId);
-  if (input) input.value = drugName;
-  
-  const suggestionId = inputId.replace('drug', 'suggestions');
-  const suggestionDiv = document.getElementById(suggestionId);
-  if (suggestionDiv) suggestionDiv.style.display = 'none';
-}
-
-function selectMultiSuggestion(inputId, drugName) {
-  const input = document.getElementById(inputId);
-  if (input) input.value = drugName;
-  
-  const suggestionId = inputId.replace('multiDrug_', 'multiSuggestions_');
-  const suggestionDiv = document.getElementById(suggestionId);
-  if (suggestionDiv) suggestionDiv.style.display = 'none';
-}
-
-// Initialize the application
-let app;
-document.addEventListener('DOMContentLoaded', () => {
-  console.log('🚀 DOM loaded, creating enhanced app...');
-  app = new PharmAssistApp();
-  console.log('✅ Enhanced app created successfully');
-});
+// Expose for remove button
+window.app = new PharmAssistApp();
