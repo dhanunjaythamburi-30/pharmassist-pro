@@ -22,32 +22,51 @@ class PharmAssistApp {
       });
     });
 
-    // Mode toggle
-    document.getElementById('twoModeBtn').addEventListener('click', () => {
-      this.switchMode('two');
-    });
+    // Mode toggle - Check if elements exist first
+    const twoModeBtn = document.getElementById('twoModeBtn');
+    const multiModeBtn = document.getElementById('multiModeBtn');
+    
+    if (twoModeBtn) {
+      twoModeBtn.addEventListener('click', () => {
+        this.switchMode('two');
+      });
+    }
 
-    document.getElementById('multiModeBtn').addEventListener('click', () => {
-      this.switchMode('multi');
-    });
+    if (multiModeBtn) {
+      multiModeBtn.addEventListener('click', () => {
+        this.switchMode('multi');
+      });
+    }
 
     // Original interaction checker
-    document.getElementById('checkInteraction').addEventListener('click', () => {
-      this.checkInteraction();
-    });
+    const checkInteractionBtn = document.getElementById('checkInteraction');
+    if (checkInteractionBtn) {
+      checkInteractionBtn.addEventListener('click', () => {
+        this.checkInteraction();
+      });
+    }
 
     // Multi-drug functionality
-    document.getElementById('addDrugBtn').addEventListener('click', () => {
-      this.addDrugInput();
-    });
+    const addDrugBtn = document.getElementById('addDrugBtn');
+    if (addDrugBtn) {
+      addDrugBtn.addEventListener('click', () => {
+        this.addDrugInput();
+      });
+    }
 
-    document.getElementById('checkAllInteractions').addEventListener('click', () => {
-      this.checkAllInteractions();
-    });
+    const checkAllBtn = document.getElementById('checkAllInteractions');
+    if (checkAllBtn) {
+      checkAllBtn.addEventListener('click', () => {
+        this.checkAllInteractions();
+      });
+    }
 
-    document.getElementById('clearAllDrugs').addEventListener('click', () => {
-      this.clearAllDrugs();
-    });
+    const clearAllBtn = document.getElementById('clearAllDrugs');
+    if (clearAllBtn) {
+      clearAllBtn.addEventListener('click', () => {
+        this.clearAllDrugs();
+      });
+    }
 
     // Quick interaction checks
     document.querySelectorAll('.quick-btn').forEach(btn => {
@@ -69,15 +88,21 @@ class PharmAssistApp {
     });
 
     // Drug search
-    document.getElementById('searchDrug').addEventListener('click', () => {
-      this.searchDrugInfo();
-    });
-
-    document.getElementById('drugSearch').addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
+    const searchBtn = document.getElementById('searchDrug');
+    if (searchBtn) {
+      searchBtn.addEventListener('click', () => {
         this.searchDrugInfo();
-      }
-    });
+      });
+    }
+
+    const drugSearchInput = document.getElementById('drugSearch');
+    if (drugSearchInput) {
+      drugSearchInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          this.searchDrugInfo();
+        }
+      });
+    }
   }
 
   switchTab(tabName) {
@@ -92,13 +117,17 @@ class PharmAssistApp {
     });
 
     // Show selected tab
-    document.getElementById(tabName).classList.add('active');
-    document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+    const selectedTab = document.getElementById(tabName);
+    const selectedBtn = document.querySelector(`[data-tab="${tabName}"]`);
+    
+    if (selectedTab) selectedTab.classList.add('active');
+    if (selectedBtn) selectedBtn.classList.add('active');
     
     this.currentTab = tabName;
   }
 
   switchMode(mode) {
+    console.log('Switching to mode:', mode); // Debug log
     this.currentMode = mode;
     
     // Update buttons
@@ -106,12 +135,21 @@ class PharmAssistApp {
     document.querySelectorAll('.mode-interface').forEach(interface => interface.classList.remove('active'));
     
     if (mode === 'two') {
-      document.getElementById('twoModeBtn').classList.add('active');
-      document.getElementById('twoModeInterface').classList.add('active');
+      const twoBtn = document.getElementById('twoModeBtn');
+      const twoInterface = document.getElementById('twoModeInterface');
+      
+      if (twoBtn) twoBtn.classList.add('active');
+      if (twoInterface) twoInterface.classList.add('active');
+      
       this.setupDrugSuggestions();
     } else {
-      document.getElementById('multiModeBtn').classList.add('active');
-      document.getElementById('multiModeInterface').classList.add('active');
+      const multiBtn = document.getElementById('multiModeBtn');
+      const multiInterface = document.getElementById('multiModeInterface');
+      
+      if (multiBtn) multiBtn.classList.add('active');
+      if (multiInterface) multiInterface.classList.add('active');
+      
+      // Add initial drugs if none exist
       if (this.drugCounter === 0) {
         this.addDrugInput();
         this.addDrugInput();
@@ -122,6 +160,11 @@ class PharmAssistApp {
   addDrugInput() {
     this.drugCounter++;
     const drugList = document.getElementById('drugList');
+    
+    if (!drugList) {
+      console.error('Drug list container not found');
+      return;
+    }
     
     const drugItem = document.createElement('div');
     drugItem.className = 'drug-item';
@@ -158,14 +201,19 @@ class PharmAssistApp {
     drugItems.forEach((item, index) => {
       const number = index + 1;
       const numberDiv = item.querySelector('.drug-number');
-      numberDiv.textContent = number;
+      if (numberDiv) numberDiv.textContent = number;
     });
   }
 
   clearAllDrugs() {
-    document.getElementById('drugList').innerHTML = '';
-    document.getElementById('multiInteractionResults').innerHTML = '';
-    document.getElementById('resultsSummary').style.display = 'none';
+    const drugList = document.getElementById('drugList');
+    const resultsContainer = document.getElementById('multiInteractionResults');
+    const summary = document.getElementById('resultsSummary');
+    
+    if (drugList) drugList.innerHTML = '';
+    if (resultsContainer) resultsContainer.innerHTML = '';
+    if (summary) summary.style.display = 'none';
+    
     this.drugCounter = 0;
     this.addDrugInput();
     this.addDrugInput();
@@ -178,7 +226,7 @@ class PharmAssistApp {
       this.addDrugInput();
       const inputs = document.querySelectorAll('#drugList input');
       const lastInput = inputs[inputs.length - 1];
-      lastInput.value = drug.trim();
+      if (lastInput) lastInput.value = drug.trim();
     });
   }
 
@@ -197,9 +245,17 @@ class PharmAssistApp {
   }
 
   checkInteraction() {
-    const drug1 = document.getElementById('drug1').value.trim().toLowerCase();
-    const drug2 = document.getElementById('drug2').value.trim().toLowerCase();
+    const drug1Input = document.getElementById('drug1');
+    const drug2Input = document.getElementById('drug2');
     const resultsContainer = document.getElementById('interactionResults');
+
+    if (!drug1Input || !drug2Input) {
+      console.error('Drug input elements not found');
+      return;
+    }
+
+    const drug1 = drug1Input.value.trim().toLowerCase();
+    const drug2 = drug2Input.value.trim().toLowerCase();
 
     if (!drug1 || !drug2) {
       this.showError('Please enter both drugs');
@@ -217,7 +273,7 @@ class PharmAssistApp {
       const interaction = this.findInteraction(drug1, drug2);
       this.hideLoading();
       this.displayInteractionResults(interaction, drug1, drug2);
-      resultsContainer.style.display = 'block';
+      if (resultsContainer) resultsContainer.style.display = 'block';
     }, 1000);
   }
 
@@ -276,6 +332,8 @@ class PharmAssistApp {
   displayInteractionResults(interaction, drug1, drug2) {
     const resultsContainer = document.getElementById('interactionResults');
     
+    if (!resultsContainer) return;
+    
     if (!interaction) {
       resultsContainer.innerHTML = `
         <div class="interaction-result">
@@ -320,11 +378,17 @@ class PharmAssistApp {
     const resultsContainer = document.getElementById('multiInteractionResults');
     const resultsSummary = document.getElementById('resultsSummary');
     
+    if (!resultsContainer || !resultsSummary) return;
+    
     const majorCount = interactions.filter(i => i.severity === 'major').length;
     
-    document.getElementById('totalDrugs').textContent = drugs.length;
-    document.getElementById('totalInteractions').textContent = interactions.length;
-    document.getElementById('majorInteractions').textContent = majorCount;
+    const totalDrugsEl = document.getElementById('totalDrugs');
+    const totalInteractionsEl = document.getElementById('totalInteractions');
+    const majorInteractionsEl = document.getElementById('majorInteractions');
+    
+    if (totalDrugsEl) totalDrugsEl.textContent = drugs.length;
+    if (totalInteractionsEl) totalInteractionsEl.textContent = interactions.length;
+    if (majorInteractionsEl) majorInteractionsEl.textContent = majorCount;
     
     resultsSummary.style.display = 'block';
     
@@ -379,6 +443,8 @@ class PharmAssistApp {
       const input = document.getElementById(inputId);
       const suggestionDiv = document.getElementById(suggestionId);
 
+      if (!input || !suggestionDiv) return;
+
       input.addEventListener('input', (e) => {
         const query = e.target.value.toLowerCase();
         if (query.length < 2) {
@@ -416,6 +482,8 @@ class PharmAssistApp {
     const input = document.getElementById(inputId);
     const suggestionDiv = document.getElementById(suggestionId);
 
+    if (!input || !suggestionDiv) return;
+
     input.addEventListener('input', (e) => {
       const query = e.target.value.toLowerCase();
       if (query.length < 2) {
@@ -445,8 +513,12 @@ class PharmAssistApp {
   }
 
   searchDrugInfo() {
-    const query = document.getElementById('drugSearch').value.trim().toLowerCase();
+    const queryInput = document.getElementById('drugSearch');
     const resultsContainer = document.getElementById('drugInfoResults');
+
+    if (!queryInput) return;
+
+    const query = queryInput.value.trim().toLowerCase();
 
     if (!query) {
       this.showError('Please enter a drug name');
@@ -464,6 +536,8 @@ class PharmAssistApp {
 
   displayDrugInfo(drugInfo, query) {
     const resultsContainer = document.getElementById('drugInfoResults');
+
+    if (!resultsContainer) return;
 
     if (!drugInfo) {
       resultsContainer.innerHTML = `
@@ -549,59 +623,73 @@ class PharmAssistApp {
 
   loadResourcesContent() {
     // Emergency drugs
-    document.getElementById('emergencyDrugs').innerHTML = EMERGENCY_DRUGS.map(drug => `
-      <div class="resource-item" style="margin-bottom: 1.5rem; padding: 1rem; background: var(--light); border-radius: 8px;">
-        <h4 style="color: var(--primary); margin-bottom: 0.5rem;">${drug.drug}</h4>
-        <p><strong>Indication:</strong> ${drug.indication}</p>
-        <p><strong>Dose:</strong> ${drug.dose}</p>
-        <p><strong>Route:</strong> ${drug.route}</p>
-        <p><strong>Notes:</strong> ${drug.notes}</p>
-      </div>
-    `).join('');
+    const emergencyEl = document.getElementById('emergencyDrugs');
+    if (emergencyEl) {
+      emergencyEl.innerHTML = EMERGENCY_DRUGS.map(drug => `
+        <div class="resource-item" style="margin-bottom: 1.5rem; padding: 1rem; background: var(--light); border-radius: 8px;">
+          <h4 style="color: var(--primary); margin-bottom: 0.5rem;">${drug.drug}</h4>
+          <p><strong>Indication:</strong> ${drug.indication}</p>
+          <p><strong>Dose:</strong> ${drug.dose}</p>
+          <p><strong>Route:</strong> ${drug.route}</p>
+          <p><strong>Notes:</strong> ${drug.notes}</p>
+        </div>
+      `).join('');
+    }
 
     // Controlled substances
-    document.getElementById('controlledSubstances').innerHTML = Object.entries(CONTROLLED_SUBSTANCES).map(([schedule, info]) => `
-      <div class="resource-item" style="margin-bottom: 1.5rem; padding: 1rem; background: var(--light); border-radius: 8px;">
-        <h4 style="color: var(--primary); margin-bottom: 0.5rem;">Schedule ${schedule}</h4>
-        <p>${info.description}</p>
-        <p><strong>Examples:</strong> ${info.examples.join(', ')}</p>
-        <p><strong>Prescribing:</strong> ${info.prescribing}</p>
-      </div>
-    `).join('');
+    const controlledEl = document.getElementById('controlledSubstances');
+    if (controlledEl) {
+      controlledEl.innerHTML = Object.entries(CONTROLLED_SUBSTANCES).map(([schedule, info]) => `
+        <div class="resource-item" style="margin-bottom: 1.5rem; padding: 1rem; background: var(--light); border-radius: 8px;">
+          <h4 style="color: var(--primary); margin-bottom: 0.5rem;">Schedule ${schedule}</h4>
+          <p>${info.description}</p>
+          <p><strong>Examples:</strong> ${info.examples.join(', ')}</p>
+          <p><strong>Prescribing:</strong> ${info.prescribing}</p>
+        </div>
+      `).join('');
+    }
 
     // Black box warnings
-    document.getElementById('blackBoxWarnings').innerHTML = BLACK_BOX_WARNINGS.map(item => `
-      <div class="resource-item" style="margin-bottom: 1.5rem; padding: 1rem; background: var(--light); border-radius: 8px;">
-        <h4 style="color: var(--danger); margin-bottom: 0.5rem;">${item.drug}</h4>
-        <p><strong>${item.warning}</strong></p>
-        <p>${item.description}</p>
-      </div>
-    `).join('');
+    const blackBoxEl = document.getElementById('blackBoxWarnings');
+    if (blackBoxEl) {
+      blackBoxEl.innerHTML = BLACK_BOX_WARNINGS.map(item => `
+        <div class="resource-item" style="margin-bottom: 1.5rem; padding: 1rem; background: var(--light); border-radius: 8px;">
+          <h4 style="color: var(--danger); margin-bottom: 0.5rem;">${item.drug}</h4>
+          <p><strong>${item.warning}</strong></p>
+          <p>${item.description}</p>
+        </div>
+      `).join('');
+    }
 
-    // Vaccine schedule (simplified)
-    document.getElementById('vaccineSchedule').innerHTML = `
-      <div class="resource-item" style="padding: 1rem; background: var(--light); border-radius: 8px;">
-        <h4 style="color: var(--primary); margin-bottom: 1rem;">Adult Routine Vaccinations</h4>
-        <ul style="margin-left: 1rem; line-height: 1.6;">
-          <li><strong>Influenza:</strong> Annual for all adults ≥6 months</li>
-          <li><strong>Td/Tdap:</strong> Every 10 years</li>
-          <li><strong>MMR:</strong> If no evidence of immunity</li>
-          <li><strong>Varicella:</strong> If no evidence of immunity</li>
-          <li><strong>Zoster:</strong> ≥50 years (Shingrix preferred)</li>
-          <li><strong>Pneumococcal:</strong> ≥65 years or high-risk conditions</li>
-          <li><strong>HPV:</strong> Through age 26 (catch-up to 45)</li>
-          <li><strong>Hepatitis B:</strong> High-risk adults</li>
-        </ul>
-      </div>
-    `;
+    // Vaccine schedule
+    const vaccineEl = document.getElementById('vaccineSchedule');
+    if (vaccineEl) {
+      vaccineEl.innerHTML = `
+        <div class="resource-item" style="padding: 1rem; background: var(--light); border-radius: 8px;">
+          <h4 style="color: var(--primary); margin-bottom: 1rem;">Adult Routine Vaccinations</h4>
+          <ul style="margin-left: 1rem; line-height: 1.6;">
+            <li><strong>Influenza:</strong> Annual for all adults ≥6 months</li>
+            <li><strong>Td/Tdap:</strong> Every 10 years</li>
+            <li><strong>MMR:</strong> If no evidence of immunity</li>
+            <li><strong>Varicella:</strong> If no evidence of immunity</li>
+            <li><strong>Zoster:</strong> ≥50 years (Shingrix preferred)</li>
+            <li><strong>Pneumococcal:</strong> ≥65 years or high-risk conditions</li>
+            <li><strong>HPV:</strong> Through age 26 (catch-up to 45)</li>
+            <li><strong>Hepatitis B:</strong> High-risk adults</li>
+          </ul>
+        </div>
+      `;
+    }
   }
 
   showLoading() {
-    document.getElementById('loadingOverlay').classList.add('show');
+    const loading = document.getElementById('loadingOverlay');
+    if (loading) loading.classList.add('show');
   }
 
   hideLoading() {
-    document.getElementById('loadingOverlay').classList.remove('show');
+    const loading = document.getElementById('loadingOverlay');
+    if (loading) loading.classList.remove('show');
   }
 
   showError(message) {
@@ -653,7 +741,7 @@ function convertDose() {
     'mg': 1,
     'g': 1000,
     'mcg': 0.001,
-    'mEq': 1 // Simplified - would need specific drug
+    'mEq': 1
   };
 
   const baseValue = dose * conversions[fromUnit];
@@ -708,22 +796,36 @@ function calculateBusiness() {
   result.classList.add('show');
 }
 
-// Global function for drug suggestions
+// Global functions for suggestions
 function selectSuggestion(inputId, drugName) {
-  document.getElementById(inputId).value = drugName;
+  const input = document.getElementById(inputId);
+  if (input) input.value = drugName;
+  
   const suggestionId = inputId.replace('drug', 'suggestions');
-  document.getElementById(suggestionId).style.display = 'none';
+  const suggestionDiv = document.getElementById(suggestionId);
+  if (suggestionDiv) suggestionDiv.style.display = 'none';
 }
 
-// Global function for multi-drug suggestions
 function selectMultiSuggestion(inputId, drugName) {
-  document.getElementById(inputId).value = drugName;
+  const input = document.getElementById(inputId);
+  if (input) input.value = drugName;
+  
   const suggestionId = inputId.replace('multiDrug_', 'multiSuggestions_');
-  document.getElementById(suggestionId).style.display = 'none';
+  const suggestionDiv = document.getElementById(suggestionId);
+  if (suggestionDiv) suggestionDiv.style.display = 'none';
 }
 
-// Make app global for remove button access
+// Initialize the application
 let app;
 document.addEventListener('DOMContentLoaded', () => {
+  console.log('DOM loaded, initializing app...');
   app = new PharmAssistApp();
+  console.log('App initialized:', app);
+});
+
+// Add debugging
+window.addEventListener('load', () => {
+  console.log('Window loaded');
+  console.log('DRUG_DATABASE available:', typeof DRUG_DATABASE !== 'undefined');
+  console.log('DRUG_INTERACTIONS available:', typeof DRUG_INTERACTIONS !== 'undefined');
 });
