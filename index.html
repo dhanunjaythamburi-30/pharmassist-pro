@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>PharmAssist Pro - Complete Pharmacy Reference</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <link href="styles.css" rel="stylesheet">
+</head>
+<body>
+  <header class="header">
+    <div class="container">
+      <div class="logo">
+        <i class="fas fa-pills"></i>
+        <h1>PharmAssist Pro</h1>
+      </div>
+      <nav class="nav">
+        <button class="nav-btn active" data-tab="interactions">
+          <i class="fas fa-exclamation-triangle"></i> Interactions
+        </button>
+        <button class="nav-btn" data-tab="drug-info">
+          <i class="fas fa-info-circle"></i> Drug Info
+        </button>
+        <button class="nav-btn" data-tab="calculations">
+          <i class="fas fa-calculator"></i> Calculations
+        </button>
+        <button class="nav-btn" data-tab="resources">
+          <i class="fas fa-book"></i> Resources
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="main">
+    <!-- Drug-Drug Interactions Tab -->
+    <div id="interactions" class="tab-content active">
+      <div class="container">
+        <div class="section-header">
+          <h2><i class="fas fa-exclamation-triangle"></i> Drug-Drug Interaction Checker</h2>
+          <p>Comprehensive interaction screening using multiple authoritative databases</p>
+        </div>
+        
+        <div class="interaction-checker">
+          <!-- Mode Toggle -->
+          <div class="mode-toggle">
+            <button id="twoModeBtn" class="mode-btn active">2 Drugs</button>
+            <button id="multiModeBtn" class="mode-btn">Multiple Drugs</button>
+          </div>
+
+          <!-- Original 2-drug interface -->
+          <div id="twoModeInterface" class="mode-interface active">
+            <div class="drug-inputs">
+              <div class="input-group">
+                <label for="drug1">Drug 1</label>
+                <input type="text" id="drug1" placeholder="Enter drug name (e.g., Warfarin)" autocomplete="off">
+                <div id="suggestions1" class="suggestions"></div>
+              </div>
+              <div class="vs">VS</div>
+              <div class="input-group">
+                <label for="drug2">Drug 2</label>
+                <input type="text" id="drug2" placeholder="Enter drug name (e.g., Amiodarone)" autocomplete="off">
+                <div id="suggestions2" class="suggestions"></div>
+              </div>
+            </div>
+            
+            <button id="checkInteraction" class="btn-primary">
+              <i class="fas fa-search"></i> Check Interaction
+            </button>
+            
+            <div id="interactionResults" class="results-container"></div>
+          </div>
+
+          <!-- Multi-drug interface -->
+          <div id="multiModeInterface" class="mode-interface">
+            <div class="multi-drug-header">
+              <h3><i class="fas fa-pills"></i> Medication List</h3>
+              <button id="addDrugBtn" class="btn-add">
+                <i class="fas fa-plus"></i> Add Drug
+              </button>
+            </div>
+            
+            <div id="drugList" class="drug-list">
+              <!-- Dynamic drug inputs will be added here -->
+            </div>
+            
+            <div class="multi-actions">
+              <button id="checkAllInteractions" class="btn-primary">
+                <i class="fas fa-search"></i> Check All Interactions
+              </button>
+              <button id="clearAllDrugs" class="btn-secondary">
+                <i class="fas fa-trash"></i> Clear All
+              </button>
+            </div>
+            
+            <!-- Results Summary -->
+            <div id="resultsSummary" class="results-summary" style="display: none;">
+              <div class="summary-grid">
+                <div class="summary-item">
+                  <div class="summary-number" id="totalDrugs">0</div>
+                  <div class="summary-label">Total Drugs</div>
+                </div>
+                <div class="summary-item">
+                  <div class="summary-number" id="totalInteractions">0</div>
+                  <div class="summary-label">Interactions Found</div>
+                </div>
+                <div class="summary-item major-summary">
+                  <div class="summary-number" id="majorInteractions">0</div>
+                  <div class="summary-label">Major Interactions</div>
+                </div>
+              </div>
+            </div>
+            
+            <div id="multiInteractionResults" class="results-container"></div>
+          </div>
+        </div>
+
+        <div class="quick-checks">
+          <h3>Quick Test Options</h3>
+          <div class="quick-grid">
+            <button class="quick-btn" data-combo="warfarin,amiodarone">Warfarin + Amiodarone</button>
+            <button class="quick-btn" data-combo="simvastatin,clarithromycin">Simvastatin + Clarithromycin</button>
+            <button class="quick-btn" data-combo="lithium,ibuprofen">Lithium + NSAIDs</button>
+            <button class="quick-btn" data-combo="digoxin,furosemide">Digoxin + Furosemide</button>
+            <button class="quick-btn" data-regimen="warfarin,amiodarone,digoxin,furosemide">🫀 Cardiac Regimen (4 drugs)</button>
+            <button class="quick-btn" data-regimen="metformin,lisinopril,metoprolol,simvastatin">🩺 Diabetes + HTN (4 drugs)</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Drug Information Tab -->
+    <div id="drug-info" class="tab-content">
+      <div class="container">
+        <div class="section-header">
+          <h2><i class="fas fa-info-circle"></i> Drug Information Database</h2>
+          <p>Comprehensive drug monographs and clinical information</p>
+        </div>
+        
+        <div class="drug-search">
+          <div class="input-group">
+            <input type="text" id="drugSearch" placeholder="Search for any medication...">
+            <button id="searchDrug" class="btn-search">
+              <i class="fas fa-search"></i>
+            </button>
+          </div>
+        </div>
+        
+        <div id="drugInfoResults" class="drug-info-results"></div>
+      </div>
+    </div>
+
+    <!-- Calculations Tab -->
+    <div id="calculations" class="tab-content">
+      <div class="container">
+        <div class="section-header">
+          <h2><i class="fas fa-calculator"></i> Pharmacy Calculations</h2>
+          <p>Essential calculations for pharmacy practice</p>
+        </div>
+        
+        <div class="calc-grid">
+          <div class="calc-card">
+            <h3>Creatinine Clearance</h3>
+            <div class="calc-inputs">
+              <input type="number" id="age" placeholder="Age (years)" min="1" max="120">
+              <input type="number" id="weight" placeholder="Weight (kg)" min="1" step="0.1">
+              <input type="number" id="serum_cr" placeholder="Serum Cr (mg/dL)" min="0.1" step="0.01">
+              <select id="gender">
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+              </select>
+            </div>
+            <button onclick="calculateCrCl()" class="btn-calc">Calculate</button>
+            <div id="crclResult" class="calc-result"></div>
+          </div>
+
+          <div class="calc-card">
+            <h3>Dosage Conversions</h3>
+            <div class="calc-inputs">
+              <input type="number" id="dose" placeholder="Dose amount" step="0.01">
+              <select id="fromUnit">
+                <option value="mg">mg</option>
+                <option value="g">g</option>
+                <option value="mcg">mcg</option>
+                <option value="mEq">mEq</option>
+              </select>
+              <select id="toUnit">
+                <option value="mg">mg</option>
+                <option value="g">g</option>
+                <option value="mcg">mcg</option>
+                <option value="mEq">mEq</option>
+              </select>
+            </div>
+            <button onclick="convertDose()" class="btn-calc">Convert</button>
+            <div id="conversionResult" class="calc-result"></div>
+          </div>
+
+          <div class="calc-card">
+            <h3>IV Flow Rate</h3>
+            <div class="calc-inputs">
+              <input type="number" id="volume" placeholder="Volume (mL)" min="1">
+              <input type="number" id="time" placeholder="Time (hours)" min="0.1" step="0.1">
+              <input type="number" id="dropFactor" placeholder="Drop factor" value="15">
+            </div>
+            <button onclick="calculateFlowRate()" class="btn-calc">Calculate</button>
+            <div id="flowRateResult" class="calc-result"></div>
+          </div>
+
+          <div class="calc-card">
+            <h3>Business Formula</h3>
+            <div class="calc-inputs">
+              <input type="number" id="strength" placeholder="Stock strength (%)" step="0.01">
+              <input type="number" id="quantity" placeholder="Quantity needed (mL)" step="0.1">
+              <input type="number" id="desired" placeholder="Desired strength (%)" step="0.01">
+            </div>
+            <button onclick="calculateBusiness()" class="btn-calc">Calculate</button>
+            <div id="businessResult" class="calc-result"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Resources Tab -->
+    <div id="resources" class="tab-content">
+      <div class="container">
+        <div class="section-header">
+          <h2><i class="fas fa-book"></i> Pharmacy Resources</h2>
+          <p>Essential references and study materials</p>
+        </div>
+        
+        <div class="resources-grid">
+          <div class="resource-card">
+            <h3><i class="fas fa-heartbeat"></i> Emergency Drugs</h3>
+            <div class="resource-content" id="emergencyDrugs"></div>
+          </div>
+          
+          <div class="resource-card">
+            <h3><i class="fas fa-syringe"></i> Vaccine Schedule</h3>
+            <div class="resource-content" id="vaccineSchedule"></div>
+          </div>
+          
+          <div class="resource-card">
+            <h3><i class="fas fa-pills"></i> Controlled Substances</h3>
+            <div class="resource-content" id="controlledSubstances"></div>
+          </div>
+          
+          <div class="resource-card">
+            <h3><i class="fas fa-exclamation-circle"></i> Black Box Warnings</h3>
+            <div class="resource-content" id="blackBoxWarnings"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <p>© 2025 Pharmaverse - Educational tool for pharmacy students. Not for clinical decision-making.</p>
+      <p><strong>Disclaimer:</strong> Always verify with official resources and consult healthcare professionals.</p>
+    </div>
+  </footer>
+
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="spinner"></div>
+    <p>Loading...</p>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
